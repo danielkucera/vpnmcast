@@ -3,6 +3,10 @@
 from ctypes import *
 import socket
 import struct
+from threading import Thread
+
+sourceif = "tun1"
+destifs = ["tap0"]
 
 # ref: IP protocol numbers
 PROTO_MAP = {
@@ -56,63 +60,85 @@ class IP(Structure):
             print "{} Not in map".format(self.ip_p)
             raise
 
-host = '0.0.0.0'
-host = '0'
-#host = '233.49.26.77'
-#host = 'tun0'
-#s = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_IGMP)
-#s = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_IGMP)
-s = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.ntohs(0x0003))
-#s = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_UDP)
-#s.setsockopt(socket.IPPROTO_IP, socket.IP_HDRINCL, 1)
-s.setsockopt(socket.SOL_SOCKET, 25, "tap0"+'\0')
-s.bind(('tap0', 0))
+class Relay(Thread):
+
+  def __init__(self):
+    Thread.__init__(self)
+    self.senders = {}
+    self.dests = {}
+      
+
+  def add_dest(self, mcast, sock, dst_mac):
+    if mcast not in self.senders.keys():
+	self.senders[mcast] = Sender(mcast)
+	self.senders[mcast].start()
+    self.senders[mcast].add_dest(sock, dst_mac)
+    print "senders:", self.senders
+
+  def add_listener(self, iface):
+    s = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.ntohs(0x0003))
+    s.setsockopt(socket.SOL_SOCKET, 25, iface+'\0')
+    s.bind((iface, 0))
+    return s
 
 
-def sock_mcast(addr):
-  sock = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_UDP)
-  try:
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-  except AttributeError:
-     pass
-  sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 32)
-  sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_LOOP, 1)
-
-  host = socket.gethostbyname('0.0.0.0')
-  sock.setsockopt(socket.SOL_IP, socket.IP_MULTICAST_IF, socket.inet_aton(host))
-  sock.setsockopt(socket.SOL_IP, socket.IP_ADD_MEMBERSHIP,
-                  socket.inet_aton(addr) + socket.inet_aton(host))
-
-  return sock
-
-
-
-print "Sniffer start..."
-try:
+  def run(self):
+    for dstif in destifs:
+      self.dests[dstif] = self.add_listener(dstif)
     while True:
-#	print "loop"
-#        buf = s.recvfrom(65535)[0]
+      for intf, s in self.dests.iteritems():
         (data,meta) = s.recvfrom(65565)
-	if meta[0] == "tap0":
-#		print data.encode("hex")
-#		print meta
-	        ip_header = IP(data[14:34])
-		if ip_header.proto == "IGMP":
-		        print '{0}: {1} -> {2}'.format(ip_header.proto,
-                                       ip_header.src,
-                                       ip_header.dst)
-			src_mac = data[6:12]
-			print src_mac.encode("hex")
-			ss = sock_mcast(ip_header.dst)
-			while True:
-				data = ss.recv(65535)
-				print len(data)
-#				print data.encode("hex")
-				src_addr = "\xf6\x3b\xcd\xb9\xbd\x48"
-				dst_addr = "\x01\x00\x5e\x31\x1a\x4d"
-#				dst_addr = src_mac
-				ethertype = "\x08\x00"
-				s.send(dst_addr+src_addr+ethertype+data)
-except KeyboardInterrupt:
-    s.close()
+#        print meta
+	ip_header = IP(data[14:34])
+	if ip_header.proto == "IGMP":
+	        print '{0}: {1} -> {2}'.format(ip_header.proto,
+                               ip_header.src,
+                               ip_header.dst)
+		src_mac = data[6:12]
+		print src_mac.encode("hex")
+		self.add_dest(ip_header.dst, s, src_mac)
+
+class Sender(Thread):
+
+  def __init__(self, mcast):
+    Thread.__init__(self)
+    self.mcast = mcast
+    self.dests = {}
+
+  def add_dest(self, sock, dst_mac):
+    self.dests[ dst_mac ] = { "sock" : sock, "ts" : 0 }
+    print "sender",self.mcast, self.dests
+
+  def create_sock(self):
+    self.sock = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_UDP)
+    try:
+      self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    except AttributeError:
+       pass
+    self.sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 32)
+    self.sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_LOOP, 1)
+  
+    host = socket.gethostbyname('0.0.0.0')
+    self.sock.setsockopt(socket.SOL_IP, socket.IP_MULTICAST_IF, socket.inet_aton(host))
+    self.sock.setsockopt(socket.SOL_IP, socket.IP_ADD_MEMBERSHIP, socket.inet_aton(self.mcast) + socket.inet_aton(host))
+    Thread.__init__(self)
+
+  def run(self):
+	self.create_sock()
+	while True:
+		data = self.sock.recv(65535)
+		for dst_addr, meta in self.dests.iteritems():
+			src_addr = "\xf6\x3b\xcd\xb9\xbd\x48"
+			ethertype = "\x08\x00"
+			meta["sock"].send(dst_addr+src_addr+ethertype+data)
+
+
+
+
+relay = Relay()
+#relay.run()
+relay.start()
+
+print "Relay started..."
+relay.join()
 
