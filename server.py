@@ -60,37 +60,41 @@ class IP(Structure):
             print "{} Not in map".format(self.ip_p)
             raise
 
-class Relay(Thread):
-
-  def __init__(self):
-    Thread.__init__(self)
-    self.senders = {}
-    self.dests = {}
-      
-
-  def add_dest(self, mcast, sock, dst_mac):
-    if mcast not in self.senders.keys():
-	self.senders[mcast] = Sender(mcast)
-	self.senders[mcast].start()
-    self.senders[mcast].add_dest(sock, dst_mac)
-    print "senders:", self.senders
-
-  def add_listener(self, iface):
+def add_raw_socket(iface):
     s = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.ntohs(0x0003))
     s.setsockopt(socket.SOL_SOCKET, 25, iface+'\0')
     s.bind((iface, 0))
     return s
 
+class Relay(Thread):
+
+  def __init__(self):
+    self.senders = {}
+    self.dests = {}
+    Thread.__init__(self)
+      
+
+  def add_dest(self, mcast, sock, dst_mac):
+    print "senders before:", self.senders
+    if not mcast in self.senders:
+	print "adding thread"
+	sender = Sender(mcast)
+	sender.start()
+	self.senders[mcast] = sender
+    self.senders[mcast].add_dest(sock, dst_mac)
+    print "senders after:", self.senders
 
   def run(self):
     for dstif in destifs:
-      self.dests[dstif] = self.add_listener(dstif)
+      self.dests[dstif] = add_raw_socket(dstif)
     while True:
       for intf, s in self.dests.iteritems():
         (data,meta) = s.recvfrom(65565)
 #        print meta
-	ip_header = IP(data[14:34])
-	if ip_header.proto == "IGMP":
+#	print data[12:14].encode("hex")
+	if data[12] == '\x08' and data[13] == '\x00':
+	    ip_header = IP(data[14:34])
+	    if ip_header.proto == "IGMP":
 	        print '{0}: {1} -> {2}'.format(ip_header.proto,
                                ip_header.src,
                                ip_header.dst)
@@ -101,32 +105,33 @@ class Relay(Thread):
 class Sender(Thread):
 
   def __init__(self, mcast):
-    Thread.__init__(self)
     self.mcast = mcast
     self.dests = {}
+    Thread.__init__(self)
 
   def add_dest(self, sock, dst_mac):
     self.dests[ dst_mac ] = { "sock" : sock, "ts" : 0 }
     print "sender",self.mcast, self.dests
 
   def create_sock(self):
-    self.sock = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_UDP)
+    sock = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_UDP)
     try:
-      self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+      sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     except AttributeError:
        pass
-    self.sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 32)
-    self.sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_LOOP, 1)
+    sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 32)
+    sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_LOOP, 1)
   
     host = socket.gethostbyname('0.0.0.0')
-    self.sock.setsockopt(socket.SOL_IP, socket.IP_MULTICAST_IF, socket.inet_aton(host))
-    self.sock.setsockopt(socket.SOL_IP, socket.IP_ADD_MEMBERSHIP, socket.inet_aton(self.mcast) + socket.inet_aton(host))
-    Thread.__init__(self)
+    sock.setsockopt(socket.SOL_IP, socket.IP_MULTICAST_IF, socket.inet_aton(host))
+    sock.setsockopt(socket.SOL_IP, socket.IP_ADD_MEMBERSHIP, socket.inet_aton(self.mcast) + socket.inet_aton(host))
+    sock.bind((self.mcast,0))
+    return sock
 
   def run(self):
-	self.create_sock()
-	while True:
-		data = self.sock.recv(65535)
+    sock = self.create_sock()
+    while True:
+		data = sock.recv(65535)
 		for dst_addr, meta in self.dests.iteritems():
 			src_addr = "\xf6\x3b\xcd\xb9\xbd\x48"
 			ethertype = "\x08\x00"
