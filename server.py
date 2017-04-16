@@ -54,17 +54,6 @@ class IP(Structure):
         self.src = socket.inet_ntoa(src)
         dst = struct.pack("<L", self.ip_dst)
         self.dst = socket.inet_ntoa(dst)
-        try:
-            self.proto = PROTO_MAP[self.ip_p]
-        except KeyError:
-            print "{} Not in map".format(self.ip_p)
-            raise
-
-def add_raw_socket(iface):
-    s = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.ntohs(0x0003))
-    s.setsockopt(socket.SOL_SOCKET, 25, iface+'\0')
-    s.bind((iface, 0))
-    return s
 
 class Relay(Thread):
 
@@ -73,6 +62,12 @@ class Relay(Thread):
     self.dests = {}
     Thread.__init__(self)
       
+  def raw_socket(self, iface):
+    s = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.ntohs(0x0003))
+    s.setsockopt(socket.SOL_SOCKET, 25, iface+'\0')
+    s.bind((iface, 0))
+    return s
+
 
   def add_dest(self, mcast, sock, dst_mac):
     print "senders before:", self.senders
@@ -86,7 +81,7 @@ class Relay(Thread):
 
   def run(self):
     for dstif in destifs:
-      self.dests[dstif] = add_raw_socket(dstif)
+      self.dests[dstif] = self.raw_socket(dstif)
     while True:
       for intf, s in self.dests.iteritems():
         (data,meta) = s.recvfrom(65565)
@@ -94,10 +89,10 @@ class Relay(Thread):
 #	print data[12:14].encode("hex")
 	if data[12] == '\x08' and data[13] == '\x00':
 	    ip_header = IP(data[14:34])
-	    if ip_header.proto == "IGMP":
-	        print '{0}: {1} -> {2}'.format(ip_header.proto,
-                               ip_header.src,
-                               ip_header.dst)
+	    if ip_header.ip_p == 2:
+		igmp_type = data[34].encode("hex")
+	        print '{0}: {1} -> {2} {3}'.format(ip_header.ip_p,
+                               ip_header.src, ip_header.dst, igmp_type)
 		src_mac = data[6:12]
 		print src_mac.encode("hex")
 		self.add_dest(ip_header.dst, s, src_mac)
