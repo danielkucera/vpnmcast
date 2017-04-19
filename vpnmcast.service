@@ -1,0 +1,20 @@
+[Unit]
+Description=VPN mcast
+After=network.target
+
+[Service]
+ExecStart=/opt/vpnmcast/vpnmcast.py
+#Type=forking
+#PIDFile=
+Restart=always
+User=root
+Group=root
+WorkingDirectory=/opt/vpnmcast/
+StandardOutput=syslog
+StandardError=syslog
+SyslogIdentifier=vpnmcast
+Environment=PATH=/bin
+
+[Install]
+WantedBy=multi-user.target
+
