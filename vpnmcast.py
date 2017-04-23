@@ -10,8 +10,11 @@ from threading import Timer
 
 sourceif = "tun1"
 destifs = ["tap0"]
+
+robustness_variable = 2
 query_interval = 125
-join_timeout = 60
+query_response_interval = 10
+group_membership_interval = robustness_variable * query_interval + query_response_interval
 
 class IP(Structure):
     ''' IP header Structure
@@ -79,7 +82,7 @@ class Relay(Thread):
 	print "adding sender",mcast
 	self.senders[mcast] = Sender(mcast)
 	self.senders[mcast].start()
-    timer = Timer(join_timeout, self.del_dest, (mcast,sock,dst_mac))
+    timer = Timer(group_membership_interval, self.del_dest, (mcast,sock,dst_mac))
     timer.start()
     if not dst_mac in self.senders[mcast].dests:
       print "adding forward",mcast,dst_mac.encode("hex")
@@ -208,7 +211,7 @@ class Query(Thread):
     return sock
 
   def run(self):
-    igmp_data = "\x11\x64\xee\x9b\x00\x00\x00\x00"
+    igmp_data = "\x11\x64\xee\x9b\x00\x00\x00\x00"  ## TODO: impelement query_response_interval (second byte + cksm)
     for dstif in destifs:
       self.dests[dstif] = self.igmp_socket(dstif)
     while True:
