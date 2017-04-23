@@ -83,7 +83,6 @@ class Relay(Thread):
     if mcast in self.senders:
       if not self.senders[mcast].del_dest(dst_mac):
         self.senders[mcast].stop()
-        self.senders[mcast].join()
         del self.senders[mcast]
     print "senders:", self.senders
 
