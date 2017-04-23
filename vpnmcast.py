@@ -52,6 +52,11 @@ class IP(Structure):
         dst = struct.pack("<L", self.ip_dst)
         self.dst = socket.inet_ntoa(dst)
 
+class Client():
+  def __init__(self, sock, timer):
+    self.sock = sock
+    self.timer = timer
+
 class Relay(Thread):
 
   def __init__(self):
@@ -78,11 +83,11 @@ class Relay(Thread):
     timer.start()
     if not dst_mac in self.senders[mcast].dests:
       print "adding forward"
-      self.senders[mcast].dests[dst_mac] = { "sock" : sock, "timer" : timer }
+      self.senders[mcast].dests[dst_mac] = Client(sock, timer)
       self.show_status()
     else:
-      self.senders[mcast].dests[dst_mac]["timer"].cancel()
-      self.senders[mcast].dests[dst_mac]["timer"]=timer
+      self.senders[mcast].dests[dst_mac].timer.cancel()
+      self.senders[mcast].dests[dst_mac].timer = timer
 
   def del_dest(self, mcast, sock, dst_mac):
     if mcast in self.senders:
@@ -165,10 +170,10 @@ class Sender(Thread):
   def run(self):
     while not self.stopped:
 		data = self.sock.recv(65535)
-		for dst_addr, meta in list(self.dests.iteritems()):
+		for dst_addr, client in list(self.dests.iteritems()):
 			src_addr = "\xf6\x3b\xcd\xb9\xbd\x48"
 			ethertype = "\x08\x00"
-			meta["sock"].send(dst_addr+src_addr+ethertype+data)
+			client.sock.send(dst_addr+src_addr+ethertype+data)
 
   def stop(self):
     self.stopped = True
