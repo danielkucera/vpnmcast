@@ -10,14 +10,6 @@ from threading import Thread
 sourceif = "tun1"
 destifs = ["tap0"]
 
-# ref: IP protocol numbers
-PROTO_MAP = {
-        1 : "ICMP",
-        2 : "IGMP",
-        6 : "TCP",
-        17: "UDP",
-        27: "RDP"}
-
 class IP(Structure):
     ''' IP header Structure
 
