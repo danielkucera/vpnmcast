@@ -94,11 +94,12 @@ class Relay(Thread):
       sender = self.senders[mcast]
       if dst_mac in sender.dests:
         print "removing forward",mcast,dst_mac.encode("hex")
+        sender.dests[dst_mac].timer.cancel()
         del sender.dests[dst_mac]
-    if len(self.senders[mcast].dests) == 0:
-      print "removing sender",mcast
-      self.senders[mcast].stop()
-      del self.senders[mcast]
+      if len(sender.dests) == 0:
+        print "removing sender",mcast
+        sender.stop()
+        del self.senders[mcast]
     self.show_status()
 
 
