@@ -62,21 +62,27 @@ class Relay(Thread):
     s.bind((iface, 0))
     return s
 
+  def show_status(self):
+    for sender,obj in self.senders.iteritems():
+      print sender, obj.dests.keys()
+
   def add_dest(self, mcast, sock, dst_mac):
     if not mcast in self.senders:
 	print "adding thread"
-	sender = Sender(mcast)
-	sender.start()
-	self.senders[mcast] = sender
-    self.senders[mcast].add_dest(sock, dst_mac)
-    print "senders:", self.senders
+	self.senders[mcast] = Sender(mcast)
+	self.senders[mcast].start()
+    self.senders[mcast].dests[dst_mac] = { "sock" : sock, "ts" : time.time() }
+    self.show_status()
 
   def del_dest(self, mcast, sock, dst_mac):
     if mcast in self.senders:
-      if not self.senders[mcast].del_dest(dst_mac):
-        self.senders[mcast].stop()
-        del self.senders[mcast]
-    print "senders:", self.senders
+      sender = self.senders[mcast]
+      if dst_mac in sender.dests:
+        del sender.dests[dst_mac]
+    if len(self.senders[mcast].dests) == 0:
+      self.senders[mcast].stop()
+      del self.senders[mcast]
+    self.show_status()
 
 
   def run(self):
@@ -130,21 +136,12 @@ class Relay(Thread):
 class Sender(Thread):
 
   def __init__(self, mcast):
-    self.mcast = mcast
-    self.dests = {}
     self.stopped = False
+    self.dests = {}
+    self.sock = self.create_sock(mcast)
     Thread.__init__(self)
 
-  def add_dest(self, sock, dst_mac):
-    self.dests[ dst_mac ] = { "sock" : sock, "ts" : time.time() }
-    print "sender",self.mcast, self.dests
-
-  def del_dest(self, dst_mac):
-    if dst_mac in self.dests:
-      del self.dests[dst_mac]
-    return len(self.dests) > 0
-
-  def create_sock(self):
+  def create_sock(self, mcast):
     sock = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_UDP)
     try:
       sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -152,13 +149,12 @@ class Sender(Thread):
        pass
     sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 32)
     sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_LOOP, 1)
+    sock.setsockopt(socket.SOL_IP, socket.IP_ADD_MEMBERSHIP, socket.inet_aton(mcast) + socket.inet_aton('0.0.0.0'))
     sock.setsockopt(socket.SOL_SOCKET, 25, sourceif+'\0')
-    sock.setsockopt(socket.SOL_IP, socket.IP_ADD_MEMBERSHIP, socket.inet_aton(self.mcast) + socket.inet_aton('0.0.0.0'))
-    sock.bind((self.mcast,0))
+    sock.bind((mcast,0))
     return sock
 
   def run(self):
-    self.sock = self.create_sock()
     while not self.stopped:
 		data = self.sock.recv(65535)
 		for dst_addr, meta in list(self.dests.iteritems()):
