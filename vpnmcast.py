@@ -76,13 +76,13 @@ class Relay(Thread):
 
   def add_dest(self, mcast, sock, dst_mac):
     if not mcast in self.senders:
-	print "adding sender"
+	print "adding sender",mcast
 	self.senders[mcast] = Sender(mcast)
 	self.senders[mcast].start()
     timer = Timer(join_timeout, self.del_dest, (mcast,sock,dst_mac))
     timer.start()
     if not dst_mac in self.senders[mcast].dests:
-      print "adding forward"
+      print "adding forward",mcast,dst_mac.encode("hex")
       self.senders[mcast].dests[dst_mac] = Client(sock, timer)
       self.show_status()
     else:
@@ -93,10 +93,10 @@ class Relay(Thread):
     if mcast in self.senders:
       sender = self.senders[mcast]
       if dst_mac in sender.dests:
-        print "removing forward"
+        print "removing forward",mcast,dst_mac.encode("hex")
         del sender.dests[dst_mac]
     if len(self.senders[mcast].dests) == 0:
-      print "removing sender"
+      print "removing sender",mcast
       self.senders[mcast].stop()
       del self.senders[mcast]
     self.show_status()
