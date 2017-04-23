@@ -10,7 +10,7 @@ from threading import Timer
 
 sourceif = "tun1"
 destifs = ["tap0"]
-query_period = 40
+query_interval = 125
 join_timeout = 60
 
 class IP(Structure):
@@ -215,7 +215,7 @@ class Query(Thread):
       for iface,sock in self.dests.iteritems():
         print "Sending general query to "+iface
         sock.sendto(igmp_data, ('224.0.0.1', 0))
-        time.sleep(query_period)
+        time.sleep(query_interval)
 
 relay = Relay()
 #relay.run()
