@@ -163,10 +163,8 @@ class Sender(Thread):
        pass
     sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 32)
     sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_LOOP, 1)
-  
-    host = socket.gethostbyname('0.0.0.0')
-    sock.setsockopt(socket.SOL_IP, socket.IP_MULTICAST_IF, socket.inet_aton(host))
-    sock.setsockopt(socket.SOL_IP, socket.IP_ADD_MEMBERSHIP, socket.inet_aton(self.mcast) + socket.inet_aton(host))
+    sock.setsockopt(socket.SOL_SOCKET, 25, sourceif+'\0')
+    sock.setsockopt(socket.SOL_IP, socket.IP_ADD_MEMBERSHIP, socket.inet_aton(self.mcast) + socket.inet_aton('0.0.0.0'))
     sock.bind((self.mcast,0))
     return sock
 
@@ -174,7 +172,7 @@ class Sender(Thread):
     self.sock = self.create_sock()
     while not self.stopped:
 		data = self.sock.recv(65535)
-		for dst_addr, meta in self.dests.iteritems():
+		for dst_addr, meta in list(self.dests.iteritems()):
 			src_addr = "\xf6\x3b\xcd\xb9\xbd\x48"
 			ethertype = "\x08\x00"
 			meta["sock"].send(dst_addr+src_addr+ethertype+data)
@@ -183,7 +181,6 @@ class Sender(Thread):
     self.stopped = True
     self.sock.close()
     
-
 relay = Relay()
 #relay.run()
 relay.start()
