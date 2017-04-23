@@ -9,6 +9,7 @@ from threading import Thread
 
 sourceif = "tun1"
 destifs = ["tap0"]
+query_period = 40
 
 class IP(Structure):
     ''' IP header Structure
@@ -201,7 +202,7 @@ class Query(Thread):
       for iface,sock in self.dests.iteritems():
         print "Sending general query to "+iface
         sock.sendto(igmp_data, ('224.0.0.1', 0))
-        time.sleep(10)
+        time.sleep(query_period)
 
 relay = Relay()
 #relay.run()
