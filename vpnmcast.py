@@ -70,7 +70,6 @@ class Relay(Thread):
     s.bind((iface, 0))
     return s
 
-
   def add_dest(self, mcast, sock, dst_mac):
     if not mcast in self.senders:
 	print "adding thread"
@@ -96,25 +95,23 @@ class Relay(Thread):
       for intf, s in self.dests.iteritems():
         (data,meta) = s.recvfrom(65565)
 #        print meta
-#	print data[12:14].encode("hex")
-	if data[12] == '\x08' and data[13] == '\x00':
-	    ip_header = IP(data[14:34])
-	    if ip_header.ip_p == 2:
+	if data[12] == '\x08' and data[13] == '\x00' and data[23] == '\x02':
+		ip_header = IP(data[14:34])
 		igmp_data = data[38:]
 		print "igmp data:", igmp_data.encode("hex")
-		igmp_type = igmp_data[0]
-	        addr = socket.inet_ntoa(igmp_data[4:8])
-	        print '{0}: {1} -> {2} {3}'.format(ip_header.ip_p,
-                               ip_header.src, ip_header.dst, igmp_type)
+		igmp_type = ord(igmp_data[0])
+	        print '{0}: {1} -> {2} {3}'.format(igmp_type, ip_header.ip_p,
+                               ip_header.src, ip_header.dst)
 		src_mac = data[6:12]
-		print igmp_type.encode("hex")
-		if igmp_type == '\x16' or igmp_type == '\x11':
+		if igmp_type == 0x16:
 		  print "adding forward"
+                  addr = socket.inet_ntoa(igmp_data[4:8])
 		  self.add_dest(addr, s, src_mac)
-		if igmp_type == '\x17':
+		if igmp_type == 0x17:
 		  print "removing forward"
+                  addr = socket.inet_ntoa(igmp_data[4:8])
 		  self.del_dest(addr, s, src_mac)
-		if igmp_type == '\x22':
+		if igmp_type == 0x22:
 		  gr_cnt = 256 * ord(igmp_data[6]) + ord(igmp_data[7])
 		  print "igmp3", gr_cnt
 		  igmp_data = igmp_data[8:]
