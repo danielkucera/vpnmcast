@@ -6,10 +6,12 @@ import fcntl
 import struct
 import time
 from threading import Thread
+from threading import Timer
 
 sourceif = "tun1"
 destifs = ["tap0"]
 query_period = 40
+join_timeout = 60
 
 class IP(Structure):
     ''' IP header Structure
@@ -69,18 +71,27 @@ class Relay(Thread):
 
   def add_dest(self, mcast, sock, dst_mac):
     if not mcast in self.senders:
-	print "adding thread"
+	print "adding sender"
 	self.senders[mcast] = Sender(mcast)
 	self.senders[mcast].start()
-    self.senders[mcast].dests[dst_mac] = { "sock" : sock, "ts" : time.time() }
-    self.show_status()
+    timer = Timer(join_timeout, self.del_dest, (mcast,sock,dst_mac))
+    timer.start()
+    if not dst_mac in self.senders[mcast].dests:
+      print "adding forward"
+      self.senders[mcast].dests[dst_mac] = { "sock" : sock, "timer" : timer }
+      self.show_status()
+    else:
+      self.senders[mcast].dests[dst_mac]["timer"].cancel()
+      self.senders[mcast].dests[dst_mac]["timer"]=timer
 
   def del_dest(self, mcast, sock, dst_mac):
     if mcast in self.senders:
       sender = self.senders[mcast]
       if dst_mac in sender.dests:
+        print "removing forward"
         del sender.dests[dst_mac]
     if len(self.senders[mcast].dests) == 0:
+      print "removing sender"
       self.senders[mcast].stop()
       del self.senders[mcast]
     self.show_status()
@@ -102,11 +113,9 @@ class Relay(Thread):
                                ip_header.src, ip_header.dst)
 		src_mac = data[6:12]
 		if igmp_type == 0x16:
-		  print "adding forward"
                   addr = socket.inet_ntoa(igmp_data[4:8])
 		  self.add_dest(addr, s, src_mac)
 		if igmp_type == 0x17:
-		  print "removing forward"
                   addr = socket.inet_ntoa(igmp_data[4:8])
 		  self.del_dest(addr, s, src_mac)
 		if igmp_type == 0x22:
@@ -121,10 +130,8 @@ class Relay(Thread):
 		    srcs = []
 		    print record_type,addr,src_cnt
 		    if record_type == 4:
-		      print "adding forward"
 		      self.add_dest(addr, s, src_mac)
 		    if record_type == 3:
-		      print "removing forward"
 		      self.del_dest(addr, s, src_mac)
 
 		    for j in range(0, src_cnt):
