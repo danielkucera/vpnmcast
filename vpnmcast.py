@@ -2,6 +2,7 @@
 
 from ctypes import *
 import socket
+import fcntl
 import struct
 import time
 from threading import Thread
@@ -180,11 +181,52 @@ class Sender(Thread):
   def stop(self):
     self.stopped = True
     self.sock.close()
-    
+
+def get_ip_address(ifname):
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    return socket.inet_ntoa(fcntl.ioctl(
+        s.fileno(),
+        0x8915,  # SIOCGIFADDR
+        struct.pack('256s', ifname[:15])
+    )[20:24])
+
+class Query(Thread):
+
+  def __init__(self):
+    self.dests = {}
+    Thread.__init__(self)
+
+  def igmp_socket(self, dstif):
+    sock = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_IGMP)
+    try:
+      sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    except AttributeError:
+      pass
+    sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 1) 
+    sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_LOOP, 1)
+
+    host = socket.gethostbyname(get_ip_address(dstif))
+    sock.setsockopt(socket.SOL_IP, socket.IP_MULTICAST_IF, socket.inet_aton(host))
+    return sock
+
+  def run(self):
+    igmp_data = "\x11\x64\xee\x9b\x00\x00\x00\x00"
+    for dstif in destifs:
+      self.dests[dstif] = self.igmp_socket(dstif)
+    while True:
+      for iface,sock in self.dests.iteritems():
+        print "Sending general query to "+iface
+        sock.sendto(igmp_data, ('224.0.0.1', 0))
+        time.sleep(10)
+
 relay = Relay()
 #relay.run()
 relay.start()
 
+qry = Query()
+qry.start()
+
 print "Relay started..."
 relay.join()
+qry.join()
 
