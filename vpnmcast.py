@@ -230,4 +230,7 @@ for dstif in destifs:
     qry.start()
 
 print "Relay started..."
-relay.join()
+
+while True:
+    time.sleep(1)
+
