@@ -8,8 +8,8 @@ import time
 from threading import Thread
 from threading import Timer
 
-sourceif = "tun1"
-destifs = ["tap0"]
+sourceif = "gre1"
+destifs = ["tap0", "tap1"]
 
 robustness_variable = 2
 query_interval = 125
@@ -62,16 +62,93 @@ class Client():
 
 class Relay(Thread):
 
-  def __init__(self):
-    self.senders = {}
-    self.dests = {}
+  def __init__(self, iface):
+    self.dest = self.raw_socket(iface)
     Thread.__init__(self)
+    self.setDaemon(True)
       
   def raw_socket(self, iface):
     s = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.ntohs(0x0003))
     s.setsockopt(socket.SOL_SOCKET, 25, iface+'\0')
     s.bind((iface, 0))
     return s
+
+  def run(self):
+    while True:
+        (data,meta) = self.dest.recvfrom(65565)
+	if data[12] == '\x08' and data[13] == '\x00' and data[23] == '\x02':
+                print meta
+		ip_header = IP(data[14:34])
+		igmp_data = data[38:]
+		print "igmp data:", igmp_data.encode("hex")
+		igmp_type = ord(igmp_data[0])
+	        print '{0}: {1} -> {2} {3}'.format(igmp_type, ip_header.ip_p,
+                               ip_header.src, ip_header.dst)
+		src_mac = data[6:12]
+		if igmp_type == 0x16:
+                  addr = socket.inet_ntoa(igmp_data[4:8])
+		  senders.add_dest(addr, self.dest, src_mac)
+		if igmp_type == 0x17:
+                  addr = socket.inet_ntoa(igmp_data[4:8])
+		  senders.del_dest(addr, self.dest, src_mac)
+		if igmp_type == 0x22:
+		  gr_cnt = 256 * ord(igmp_data[6]) + ord(igmp_data[7])
+		  print "igmp3", gr_cnt
+		  igmp_data = igmp_data[8:]
+		  for i in range(0, gr_cnt):
+		    record_type = ord(igmp_data[0])
+		    src_cnt = 256 * ord(igmp_data[2]) + ord(igmp_data[3])
+		    addr = socket.inet_ntoa(igmp_data[4:8])
+		    igmp_data = igmp_data[8:]
+		    srcs = []
+		    print record_type,addr,src_cnt
+		    if record_type == 4:
+		      senders.add_dest(addr, self.dest, src_mac)
+		    if record_type == 3:
+		      senders.del_dest(addr, self.dest, src_mac)
+
+		    for j in range(0, src_cnt):
+		      srcs.push(socket.inet_ntoa(igmp_data[:4]))
+		      print srcs
+		      igmp_data = igmp_data[4:]
+
+class Sender(Thread):
+
+  def __init__(self, mcast):
+    self.stopped = False
+    self.dests = {}
+    self.sock = self.create_sock(mcast)
+    Thread.__init__(self)
+    self.setDaemon(True)
+
+  def create_sock(self, mcast):
+    sock = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_UDP)
+    try:
+      sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    except AttributeError:
+       pass
+    sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 32)
+    sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_LOOP, 1)
+    sock.setsockopt(socket.SOL_IP, socket.IP_ADD_MEMBERSHIP, socket.inet_aton(mcast) + socket.inet_aton('0.0.0.0'))
+    sock.setsockopt(socket.SOL_SOCKET, 25, sourceif+'\0')
+    sock.bind((mcast,0))
+    return sock
+
+  def run(self):
+    while not self.stopped:
+		data = self.sock.recv(65535)
+		for dst_addr, client in list(self.dests.iteritems()):
+			src_addr = "\xf6\x3b\xcd\xb9\xbd\x48"
+			ethertype = "\x08\x00"
+			client.sock.send(dst_addr+src_addr+ethertype+data)
+
+  def stop(self):
+    self.stopped = True
+    self.sock.close()
+
+class Senders():
+  def __init__(self):
+    self.senders = {}
 
   def show_status(self):
     for sender,obj in self.senders.iteritems():
@@ -106,83 +183,6 @@ class Relay(Thread):
     self.show_status()
 
 
-  def run(self):
-    for dstif in destifs:
-      self.dests[dstif] = self.raw_socket(dstif)
-    while True:
-      for intf, s in self.dests.iteritems():
-        (data,meta) = s.recvfrom(65565)
-#        print meta
-	if data[12] == '\x08' and data[13] == '\x00' and data[23] == '\x02':
-		ip_header = IP(data[14:34])
-		igmp_data = data[38:]
-		print "igmp data:", igmp_data.encode("hex")
-		igmp_type = ord(igmp_data[0])
-	        print '{0}: {1} -> {2} {3}'.format(igmp_type, ip_header.ip_p,
-                               ip_header.src, ip_header.dst)
-		src_mac = data[6:12]
-		if igmp_type == 0x16:
-                  addr = socket.inet_ntoa(igmp_data[4:8])
-		  self.add_dest(addr, s, src_mac)
-		if igmp_type == 0x17:
-                  addr = socket.inet_ntoa(igmp_data[4:8])
-		  self.del_dest(addr, s, src_mac)
-		if igmp_type == 0x22:
-		  gr_cnt = 256 * ord(igmp_data[6]) + ord(igmp_data[7])
-		  print "igmp3", gr_cnt
-		  igmp_data = igmp_data[8:]
-		  for i in range(0, gr_cnt):
-		    record_type = ord(igmp_data[0])
-		    src_cnt = 256 * ord(igmp_data[2]) + ord(igmp_data[3])
-		    addr = socket.inet_ntoa(igmp_data[4:8])
-		    igmp_data = igmp_data[8:]
-		    srcs = []
-		    print record_type,addr,src_cnt
-		    if record_type == 4:
-		      self.add_dest(addr, s, src_mac)
-		    if record_type == 3:
-		      self.del_dest(addr, s, src_mac)
-
-		    for j in range(0, src_cnt):
-		      srcs.push(socket.inet_ntoa(igmp_data[:4]))
-		      print srcs
-		      igmp_data = igmp_data[4:]
-#		    self.add_dest(addr, s, src_mac)
-#		    igmp_data = igmp_data[8+gr_cnt*4:]
-
-class Sender(Thread):
-
-  def __init__(self, mcast):
-    self.stopped = False
-    self.dests = {}
-    self.sock = self.create_sock(mcast)
-    Thread.__init__(self)
-
-  def create_sock(self, mcast):
-    sock = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_UDP)
-    try:
-      sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    except AttributeError:
-       pass
-    sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 32)
-    sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_LOOP, 1)
-    sock.setsockopt(socket.SOL_IP, socket.IP_ADD_MEMBERSHIP, socket.inet_aton(mcast) + socket.inet_aton('0.0.0.0'))
-    sock.setsockopt(socket.SOL_SOCKET, 25, sourceif+'\0')
-    sock.bind((mcast,0))
-    return sock
-
-  def run(self):
-    while not self.stopped:
-		data = self.sock.recv(65535)
-		for dst_addr, client in list(self.dests.iteritems()):
-			src_addr = "\xf6\x3b\xcd\xb9\xbd\x48"
-			ethertype = "\x08\x00"
-			client.sock.send(dst_addr+src_addr+ethertype+data)
-
-  def stop(self):
-    self.stopped = True
-    self.sock.close()
-
 def get_ip_address(ifname):
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     return socket.inet_ntoa(fcntl.ioctl(
@@ -193,9 +193,11 @@ def get_ip_address(ifname):
 
 class Query(Thread):
 
-  def __init__(self):
-    self.dests = {}
+  def __init__(self, iface):
     Thread.__init__(self)
+    self.setDaemon(True)
+    self.iface = iface
+    self.dest = self.igmp_socket(iface)
 
   def igmp_socket(self, dstif):
     sock = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_IGMP)
@@ -212,22 +214,20 @@ class Query(Thread):
 
   def run(self):
     igmp_data = "\x11\x64\xee\x9b\x00\x00\x00\x00"  ## TODO: impelement query_response_interval (second byte + cksm)
-    for dstif in destifs:
-      self.dests[dstif] = self.igmp_socket(dstif)
     while True:
-      for iface,sock in self.dests.iteritems():
-        print "Sending general query to "+iface
-        sock.sendto(igmp_data, ('224.0.0.1', 0))
+        print "Sending general query to " + self.iface
+        self.dest.sendto(igmp_data, ('224.0.0.1', 0))
         time.sleep(query_interval)
 
-relay = Relay()
-#relay.run()
-relay.start()
+senders = Senders() 
 
-qry = Query()
-qry.start()
+for dstif in destifs:
+    relay = Relay(dstif)
+    #relay.run()
+    relay.start()
+
+    qry = Query(dstif)
+    qry.start()
 
 print "Relay started..."
 relay.join()
-qry.join()
-
